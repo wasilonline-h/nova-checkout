@@ -1,0 +1,5 @@
+{
+  "name": "Nova Checkout - Multivendor AI",
+  "description": "A next-generation, multistep checkout experience designed for WooCommerce HPOS and Dokan. Features vendor-specific shipping, real-time cart validation, and an AI Shopping Concierge powered by Gemini.",
+  "requestFramePermissions": []
+}

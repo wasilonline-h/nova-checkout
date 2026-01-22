@@ -1,0 +1,8 @@
+/* Base styles to prevent 404 errors. 
+   Tailwind is currently loaded via CDN in index.html for this setup. 
+*/
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
