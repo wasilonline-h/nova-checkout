@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { CheckoutStep, CartItem, UserDetails, CheckoutState, Vendor, ShippingOption } from './types';
 import { VENDORS, INITIAL_CART, INITIAL_USER_DETAILS, SHIPPING_OPTIONS } from './constants';
 import { CartView } from './components/steps/CartView';
@@ -7,15 +7,24 @@ import { ShippingSelection } from './components/steps/ShippingSelection';
 import { PaymentStep } from './components/steps/PaymentStep';
 import { SummarySidebar } from './components/SummarySidebar';
 import { GeminiConcierge } from './components/GeminiConcierge';
-import { CheckCircle2, ChevronRight, Package, Truck, CreditCard, PartyPopper, ShoppingBag } from 'lucide-react';
+import { CheckCircle2, Package, Truck, CreditCard, PartyPopper, ShoppingBag } from 'lucide-react';
 
 // Declare the WordPress data interface
 declare global {
   interface Window {
+    novaCheckoutData?: {
+      cart: any;
+      vendors: any;
+      shippingOptions: ShippingOption[];
+      paymentGateways?: { id: string; title: string; description: string }[];
+      nonce: string;
+      ajaxUrl: string;
+    };
     NovaCheckoutData?: {
       cart: CartItem[];
       vendors: Record<string, Vendor>;
       shippingOptions: ShippingOption[];
+      paymentGateways?: { id: string; title: string; description: string }[];
       siteUrl: string;
       ajaxUrl: string;
       nonce: string;
@@ -29,14 +38,37 @@ declare global {
 
 // Get data from WordPress or use fallback for development
 const getInitialData = () => {
-  const wpData = window.NovaCheckoutData;
+  // Check both possible global variable names (PHP uses lowercase)
+  const wpData = window.novaCheckoutData || window.NovaCheckoutData;
 
-  if (wpData && wpData.cart && wpData.cart.length > 0) {
-    return {
-      cart: wpData.cart,
-      vendors: wpData.vendors || VENDORS,
-      shippingOptions: wpData.shippingOptions || SHIPPING_OPTIONS,
-    };
+  // Production/WordPress Context
+  // PHP returns cart as { items: [], subtotal, total } OR directly as array
+  if (wpData && wpData.cart) {
+    // Handle both formats: cart.items (from PHP) or cart directly (array)
+    const cartItems = Array.isArray(wpData.cart)
+      ? wpData.cart
+      : (wpData.cart.items || []);
+
+    if (cartItems.length > 0) {
+      // Transform PHP cart items to match React CartItem interface
+      const transformedCart = cartItems.map((item: any) => ({
+        id: String(item.id || item.product_id),
+        productId: item.id || item.product_id,
+        title: item.name || item.title,
+        price: parseFloat(item.price) || 0,
+        image: item.image || '',
+        vendorId: String(item.vendor || item.vendorId || '1'),
+        description: item.description || '',
+        quantity: parseInt(item.quantity) || 1
+      }));
+
+      return {
+        cart: transformedCart,
+        vendors: wpData.vendors || VENDORS,
+        shippingOptions: wpData.shippingOptions || SHIPPING_OPTIONS,
+        paymentGateways: wpData.paymentGateways || [],
+      };
+    }
   }
 
   // Fallback for development/preview
@@ -62,7 +94,7 @@ const App: React.FC = () => {
     paymentMethod: initialData.paymentGateways?.[0]?.id || ''
   });
 
-  const [vendors] = useState<Record<string, Vendor>>(initialData.vendors);
+  // Derived state (no need for useState for static data unless it changes)
   const [paymentGateways] = useState(initialData.paymentGateways || []);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -86,15 +118,16 @@ const App: React.FC = () => {
     if (state.step < CheckoutStep.PAYMENT) {
       setState(prev => ({ ...prev, step: prev.step + 1 }));
     } else {
-      // Submit order to WordPress
+      // Submit order to WordPress and redirect to payment
       setIsProcessing(true);
 
       try {
-        const wpData = window.NovaCheckoutData;
+        // Get WordPress data (check both variable names)
+        const wpData = window.novaCheckoutData || window.NovaCheckoutData;
 
         if (wpData && wpData.ajaxUrl) {
-          // Submit to WordPress
-          const response = await fetch(`${wpData.ajaxUrl}?action=nova_submit_order&nonce=${wpData.nonce}`, {
+          // Submit to WordPress - create real WooCommerce order
+          const response = await fetch(`${wpData.ajaxUrl}?action=wasilonline_create_order&nonce=${wpData.nonce}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -102,13 +135,22 @@ const App: React.FC = () => {
             body: JSON.stringify({
               details: state.details,
               shippingSelection: state.shippingSelection,
+              paymentMethod: state.paymentMethod
             }),
           });
 
           const result = await response.json();
 
-          if (result.success) {
-            setOrderNumber(result.data.orderNumber || 'NOVA-' + Date.now());
+          if (result.success && result.data) {
+            // Check if we need to redirect to payment page
+            if (result.data.redirect) {
+              // Redirect to WooCommerce payment page or thank you page
+              window.location.href = result.data.redirect;
+              return;
+            }
+
+            // Fallback: show success in React
+            setOrderNumber(result.data.order_number || result.data.orderNumber || 'ORDER-' + Date.now());
             setIsSuccess(true);
           } else {
             alert(result.data?.message || 'Order submission failed. Please try again.');
@@ -116,7 +158,7 @@ const App: React.FC = () => {
         } else {
           // Development mode - simulate success
           await new Promise(resolve => setTimeout(resolve, 2000));
-          setOrderNumber('NOVA-' + Math.floor(Math.random() * 10000));
+          setOrderNumber('DEV-' + Math.floor(Math.random() * 10000));
           setIsSuccess(true);
         }
       } catch (error) {
