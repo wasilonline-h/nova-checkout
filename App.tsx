@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { CheckoutStep, CartItem, UserDetails, CheckoutState } from './types';
+import React, { useState, useEffect } from 'react';
+import { CheckoutStep, CartItem, UserDetails, CheckoutState, Vendor, ShippingOption } from './types';
 import { VENDORS, INITIAL_CART, INITIAL_USER_DETAILS, SHIPPING_OPTIONS } from './constants';
 import { CartView } from './components/steps/CartView';
 import { DetailsForm } from './components/steps/DetailsForm';
@@ -9,38 +9,122 @@ import { SummarySidebar } from './components/SummarySidebar';
 import { GeminiConcierge } from './components/GeminiConcierge';
 import { CheckCircle2, ChevronRight, Package, Truck, CreditCard, PartyPopper, ShoppingBag } from 'lucide-react';
 
+// Declare the WordPress data interface
+declare global {
+  interface Window {
+    NovaCheckoutData?: {
+      cart: CartItem[];
+      vendors: Record<string, Vendor>;
+      shippingOptions: ShippingOption[];
+      siteUrl: string;
+      ajaxUrl: string;
+      nonce: string;
+      currency: string;
+      isLoggedIn: boolean;
+      checkoutUrl: string;
+      apiKey: string;
+    };
+  }
+}
+
+// Get data from WordPress or use fallback for development
+const getInitialData = () => {
+  const wpData = window.NovaCheckoutData;
+
+  if (wpData && wpData.cart && wpData.cart.length > 0) {
+    return {
+      cart: wpData.cart,
+      vendors: wpData.vendors || VENDORS,
+      shippingOptions: wpData.shippingOptions || SHIPPING_OPTIONS,
+    };
+  }
+
+  // Fallback for development/preview
+  return {
+    cart: INITIAL_CART,
+    vendors: VENDORS,
+    shippingOptions: SHIPPING_OPTIONS,
+    paymentGateways: [
+      { id: 'stripe', title: 'Credit Card (Stripe)', description: 'Pay securely via Credit Card' },
+      { id: 'cod', title: 'Cash on Delivery', description: 'Pay upon delivery' }
+    ]
+  };
+};
+
 const App: React.FC = () => {
+  const initialData = getInitialData();
+
   const [state, setState] = useState<CheckoutState>({
     step: CheckoutStep.CART,
-    cart: INITIAL_CART,
+    cart: initialData.cart,
     details: INITIAL_USER_DETAILS,
-    shippingSelection: {} // Initialize empty
+    shippingSelection: {}, // Initialize empty
+    paymentMethod: initialData.paymentGateways?.[0]?.id || ''
   });
+
+  const [vendors] = useState<Record<string, Vendor>>(initialData.vendors);
+  const [paymentGateways] = useState(initialData.paymentGateways || []);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [orderNumber, setOrderNumber] = useState<string>('');
 
   const handleNext = async () => {
     if (state.step === CheckoutStep.CART && state.cart.length === 0) return;
-    
+
     // Auto-select default shipping if not selected when moving to shipping step
     if (state.step === CheckoutStep.DETAILS) {
-       const uniqueVendors = Array.from(new Set(state.cart.map(i => i.vendorId)));
-       const newSelections = { ...state.shippingSelection };
-       uniqueVendors.forEach(vid => {
-         if (!newSelections[vid]) newSelections[vid] = SHIPPING_OPTIONS[0].id;
-       });
-       setState(prev => ({ ...prev, shippingSelection: newSelections, step: prev.step + 1 }));
-       return;
+      const uniqueVendors = Array.from(new Set(state.cart.map((i: CartItem) => i.vendorId)));
+      const newSelections = { ...state.shippingSelection };
+      const defaultShipping = initialData.shippingOptions[0]?.id || 'free';
+      uniqueVendors.forEach((vid: string) => {
+        if (!newSelections[vid]) newSelections[vid] = defaultShipping;
+      });
+      setState(prev => ({ ...prev, shippingSelection: newSelections, step: prev.step + 1 }));
+      return;
     }
 
     if (state.step < CheckoutStep.PAYMENT) {
       setState(prev => ({ ...prev, step: prev.step + 1 }));
     } else {
-      // Fake processing delay
+      // Submit order to WordPress
       setIsProcessing(true);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setIsProcessing(false);
-      setIsSuccess(true);
+
+      try {
+        const wpData = window.NovaCheckoutData;
+
+        if (wpData && wpData.ajaxUrl) {
+          // Submit to WordPress
+          const response = await fetch(`${wpData.ajaxUrl}?action=nova_submit_order&nonce=${wpData.nonce}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              details: state.details,
+              shippingSelection: state.shippingSelection,
+            }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            setOrderNumber(result.data.orderNumber || 'NOVA-' + Date.now());
+            setIsSuccess(true);
+          } else {
+            alert(result.data?.message || 'Order submission failed. Please try again.');
+          }
+        } else {
+          // Development mode - simulate success
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          setOrderNumber('NOVA-' + Math.floor(Math.random() * 10000));
+          setIsSuccess(true);
+        }
+      } catch (error) {
+        console.error('Order submission error:', error);
+        alert('An error occurred. Please try again.');
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -98,33 +182,33 @@ const App: React.FC = () => {
         <div className="bg-white max-w-lg w-full rounded-2xl shadow-xl p-8 md:p-12 text-center animate-in fade-in zoom-in duration-500 border border-slate-100 relative overflow-hidden">
           {/* Confetti Decoration */}
           <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
-          
+
           <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <PartyPopper className="w-10 h-10 animate-bounce" />
           </div>
-          
+
           <h2 className="text-3xl font-bold text-slate-900 mb-4">Order Confirmed!</h2>
           <p className="text-slate-500 mb-8">
-            Thank you for your purchase. Your order <span className="font-mono font-medium text-slate-800">#NOVA-8829</span> has been placed successfully.
+            Thank you for your purchase. Your order <span className="font-mono font-medium text-slate-800">#{orderNumber || 'NOVA-0000'}</span> has been placed successfully.
           </p>
 
           <div className="bg-slate-50 rounded-xl p-6 mb-8 text-left border border-slate-100">
-             <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-               <ShoppingBag className="w-4 h-4" /> Order Details
-             </h3>
-             <ul className="space-y-2 text-sm text-slate-600">
-                <li className="flex justify-between">
-                  <span>Confirmation sent to:</span>
-                  <span className="font-medium text-slate-900">{state.details.email || 'guest@example.com'}</span>
-                </li>
-                <li className="flex justify-between">
-                  <span>Estimated Delivery:</span>
-                  <span className="font-medium text-slate-900">3-5 Business Days</span>
-                </li>
-             </ul>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4" /> Order Details
+            </h3>
+            <ul className="space-y-2 text-sm text-slate-600">
+              <li className="flex justify-between">
+                <span>Confirmation sent to:</span>
+                <span className="font-medium text-slate-900">{state.details.email || 'guest@example.com'}</span>
+              </li>
+              <li className="flex justify-between">
+                <span>Estimated Delivery:</span>
+                <span className="font-medium text-slate-900">3-5 Business Days</span>
+              </li>
+            </ul>
           </div>
 
-          <button 
+          <button
             onClick={() => window.location.reload()}
             className="w-full bg-slate-900 text-white py-3.5 rounded-xl font-semibold hover:bg-slate-800 transition"
           >
@@ -153,37 +237,35 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
         {/* Progress Bar */}
         <div className="mb-10 md:mb-16">
-           <div className="flex items-center justify-between max-w-4xl mx-auto relative">
-              {/* Connector Lines */}
-              <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 -translate-y-1/2 rounded-full"></div>
-              <div 
-                className="absolute top-1/2 left-0 h-1 bg-indigo-600 -z-10 -translate-y-1/2 rounded-full transition-all duration-500"
-                style={{ width: `${(state.step / (steps.length - 1)) * 100}%` }}
-              ></div>
+          <div className="flex items-center justify-between max-w-4xl mx-auto relative">
+            {/* Connector Lines */}
+            <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 -translate-y-1/2 rounded-full"></div>
+            <div
+              className="absolute top-1/2 left-0 h-1 bg-indigo-600 -z-10 -translate-y-1/2 rounded-full transition-all duration-500"
+              style={{ width: `${(state.step / (steps.length - 1)) * 100}%` }}
+            ></div>
 
-              {steps.map((s, idx) => {
-                const Icon = s.icon;
-                const isActive = idx <= state.step;
-                const isCurrent = idx === state.step;
-                
-                return (
-                  <div key={s.id} className="flex flex-col items-center gap-2 bg-slate-50 px-2">
-                    <div className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center border-4 transition-all duration-300 ${
-                      isActive 
-                        ? 'bg-indigo-600 border-indigo-100 text-white shadow-lg shadow-indigo-500/20 scale-110' 
-                        : 'bg-white border-slate-200 text-slate-300'
+            {steps.map((s, idx) => {
+              const Icon = s.icon;
+              const isActive = idx <= state.step;
+              const isCurrent = idx === state.step;
+
+              return (
+                <div key={s.id} className="flex flex-col items-center gap-2 bg-slate-50 px-2">
+                  <div className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center border-4 transition-all duration-300 ${isActive
+                    ? 'bg-indigo-600 border-indigo-100 text-white shadow-lg shadow-indigo-500/20 scale-110'
+                    : 'bg-white border-slate-200 text-slate-300'
                     }`}>
-                      <Icon className="w-5 h-5 md:w-6 md:h-6" />
-                    </div>
-                    <span className={`text-xs md:text-sm font-medium transition-colors ${
-                      isCurrent ? 'text-indigo-700' : isActive ? 'text-slate-800' : 'text-slate-400'
-                    }`}>
-                      {s.label}
-                    </span>
+                    <Icon className="w-5 h-5 md:w-6 md:h-6" />
                   </div>
-                );
-              })}
-           </div>
+                  <span className={`text-xs md:text-sm font-medium transition-colors ${isCurrent ? 'text-indigo-700' : isActive ? 'text-slate-800' : 'text-slate-400'
+                    }`}>
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 md:gap-12 relative">
@@ -191,8 +273,8 @@ const App: React.FC = () => {
           {isProcessing && (
             <div className="absolute inset-0 z-50 bg-white/50 backdrop-blur-sm flex items-center justify-center rounded-2xl">
               <div className="flex flex-col items-center gap-3">
-                 <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                 <span className="font-semibold text-indigo-900">Processing Secure Payment...</span>
+                <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                <span className="font-semibold text-indigo-900">Processing Secure Payment...</span>
               </div>
             </div>
           )}
@@ -200,44 +282,48 @@ const App: React.FC = () => {
           {/* Main Content Area */}
           <div className="lg:col-span-2 space-y-8">
             {state.step === CheckoutStep.CART && (
-              <CartView 
-                cart={state.cart} 
-                vendors={VENDORS} 
+              <CartView
+                cart={state.cart}
+                vendors={VENDORS}
                 updateQuantity={updateQuantity}
                 removeItem={removeItem}
               />
             )}
-            
+
             {state.step === CheckoutStep.DETAILS && (
-              <DetailsForm 
-                details={state.details} 
-                updateDetails={updateDetails} 
+              <DetailsForm
+                details={state.details}
+                updateDetails={updateDetails}
               />
             )}
-            
+
             {state.step === CheckoutStep.SHIPPING && (
-              <ShippingSelection 
+              <ShippingSelection
                 cart={state.cart}
                 vendors={VENDORS}
                 selections={state.shippingSelection}
                 onSelect={updateShipping}
               />
             )}
-            
+
             {state.step === CheckoutStep.PAYMENT && (
-              <PaymentStep />
+              <PaymentStep
+                gateways={paymentGateways}
+                selectedMethod={state.paymentMethod}
+                onSelect={(id) => setState(prev => ({ ...prev, paymentMethod: id }))}
+              />
             )}
           </div>
 
           {/* Sidebar */}
           <div className="lg:col-span-1">
-             <SummarySidebar 
-               cart={state.cart} 
-               shippingSelections={state.shippingSelection}
-               step={state.step}
-               onNext={handleNext}
-               onBack={handleBack}
-             />
+            <SummarySidebar
+              cart={state.cart}
+              shippingSelections={state.shippingSelection}
+              step={state.step}
+              onNext={handleNext}
+              onBack={handleBack}
+            />
           </div>
         </div>
       </main>

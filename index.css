@@ -1,8 +1,60 @@
-/* Base styles to prevent 404 errors. 
-   Tailwind is currently loaded via CDN in index.html for this setup. 
-*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
 body {
   margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar for cleaner look */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f1f1; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Animate-in utilities that Tailwind doesn't have by default */
+@layer utilities {
+  .animate-in {
+    animation: fadeSlideIn 0.5s ease-out forwards;
+  }
+  
+  .fade-in {
+    animation: fadeIn 0.3s ease-out forwards;
+  }
+  
+  .slide-in-from-bottom-4 {
+    --tw-translate-y: 1rem;
+  }
+  
+  .slide-in-from-bottom-10 {
+    --tw-translate-y: 2.5rem;
+  }
+  
+  .slide-in-from-top-2 {
+    --tw-translate-y: -0.5rem;
+  }
+  
+  .zoom-in {
+    transform: scale(0.95);
+  }
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--tw-translate-y, 1rem));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

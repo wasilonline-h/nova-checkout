@@ -49,9 +49,17 @@ export enum CheckoutStep {
   PAYMENT = 3,
 }
 
+export interface PaymentGateway {
+  id: string;
+  title: string;
+  description: string;
+  icon?: string;
+}
+
 export interface CheckoutState {
   step: CheckoutStep;
   cart: CartItem[];
   details: UserDetails;
   shippingSelection: Record<string, string>; // vendorId -> shippingOptionId
+  paymentMethod: string;
 }
